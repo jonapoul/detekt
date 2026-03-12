@@ -56,6 +56,10 @@ class DetektBasePlugin : Plugin<Project> {
             extension.config.setFrom(project.files(defaultConfigFile))
         }
 
+        val compilerPlugins = project.configurations.register(CONFIGURATION_DETEKT_COMPILER_PLUGINS) { c ->
+            // TBC
+        }
+
         project.configurations.register(CONFIGURATION_DETEKT_PLUGINS) { configuration ->
             configuration.isVisible = false
             configuration.isTransitive = true
@@ -145,3 +149,4 @@ class DetektBasePlugin : Plugin<Project> {
 }
 
 internal const val CONFIGURATION_DETEKT_PLUGINS = "detektPlugins"
+internal const val CONFIGURATION_DETEKT_COMPILER_PLUGINS = "detektCompilerPlugins"

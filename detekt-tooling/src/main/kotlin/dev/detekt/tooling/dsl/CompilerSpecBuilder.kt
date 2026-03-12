@@ -12,9 +12,10 @@ class CompilerSpecBuilder : Builder<CompilerSpec> {
     var classpath: String? = null
     var jdkHome: Path? = null
     var freeCompilerArgs: List<String> = emptyList()
+    var compilerPluginClassLoader: ClassLoader? = null
 
     override fun build(): CompilerSpec =
-        CompilerModel(jvmTarget, languageVersion, apiVersion, classpath, jdkHome, freeCompilerArgs)
+        CompilerModel(jvmTarget, languageVersion, apiVersion, classpath, jdkHome, freeCompilerArgs, compilerPluginClassLoader)
 }
 
 private data class CompilerModel(
@@ -24,4 +25,5 @@ private data class CompilerModel(
     override val classpath: String?,
     override val jdkHome: Path?,
     override val freeCompilerArgs: List<String>,
+    override val compilerPluginClassLoader: ClassLoader?,
 ) : CompilerSpec

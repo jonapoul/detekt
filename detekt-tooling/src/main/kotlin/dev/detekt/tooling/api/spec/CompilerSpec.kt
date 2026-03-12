@@ -37,4 +37,6 @@ interface CompilerSpec {
      * Options to pass to the Kotlin compiler.
      */
     val freeCompilerArgs: List<String>
+
+    val compilerPluginClassLoader: ClassLoader?
 }

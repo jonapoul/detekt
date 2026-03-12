@@ -80,6 +80,7 @@ internal fun CliArgs.createSpec(output: Appendable, error: Appendable): Processi
             classpath = args.classpath?.trim()
             jdkHome = args.jdkHome
             freeCompilerArgs = args.freeCompilerArgs
+            compilerPluginClassLoader = args.compilerPluginClassLoader
         }
     }
 }

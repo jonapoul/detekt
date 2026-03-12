@@ -12,17 +12,21 @@ import org.jetbrains.kotlin.cli.jvm.config.addJvmClasspathRoots
 import org.jetbrains.kotlin.cli.jvm.config.configureJdkClasspathRoots
 import org.jetbrains.kotlin.cli.jvm.configureAdvancedJvmOptions
 import org.jetbrains.kotlin.cli.jvm.setupJvmSpecificArguments
+import org.jetbrains.kotlin.compiler.plugin.CompilerPluginRegistrar
+import org.jetbrains.kotlin.compiler.plugin.ExperimentalCompilerApi
 import org.jetbrains.kotlin.config.CommonConfigurationKeys
 import org.jetbrains.kotlin.config.CompilerConfiguration
 import org.jetbrains.kotlin.config.JVMConfigurationKeys
 import java.io.File
 import java.io.PrintStream
 import java.nio.file.Path
+import java.util.ServiceLoader
 
 /**
  * Creates a compiler configuration for the kotlin compiler with all known sources and classpath jars.
  * Be aware that if any path of [pathsToAnalyze] is a directory it is scanned for java and kotlin files.
  */
+@OptIn(ExperimentalCompilerApi::class)
 @Suppress("LongParameterList")
 fun createCompilerConfiguration(
     pathsToAnalyze: List<Path>,
@@ -32,6 +36,7 @@ fun createCompilerConfiguration(
     jvmTarget: String,
     jdkHome: Path?,
     freeCompilerArgs: List<String>,
+    compilerPluginClassLoader: ClassLoader?,
     printStream: PrintStream,
 ): CompilerConfiguration {
     val javaFiles = pathsToAnalyze.flatMap { path ->
@@ -69,6 +74,10 @@ fun createCompilerConfiguration(
 
     validateArguments(jvmCompilerArguments.errors)?.let { throw IllegalStateException(it) }
 
+    val registrars = compilerPluginClassLoader?.let { loader ->
+        ServiceLoader.load(CompilerPluginRegistrar::class.java, loader)
+    }
+
     return CompilerConfiguration().apply {
         addJavaSourceRoots(javaFiles)
         addKotlinSourceRoots(kotlinFiles)
@@ -88,5 +97,6 @@ fun createCompilerConfiguration(
         }
 
         configureJdkClasspathRoots()
+        registrars?.forEach { r -> add(CompilerPluginRegistrar.COMPILER_PLUGIN_REGISTRARS, r) }
     }
 }

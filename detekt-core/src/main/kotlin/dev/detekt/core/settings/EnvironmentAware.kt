@@ -54,6 +54,7 @@ internal class EnvironmentFacade(projectSpec: ProjectSpec, compilerSpec: Compile
         compilerSpec.jvmTarget,
         compilerSpec.jdkHome,
         compilerSpec.freeCompilerArgs,
+        compilerSpec.compilerPluginClassLoader,
         printStream,
     )
 
