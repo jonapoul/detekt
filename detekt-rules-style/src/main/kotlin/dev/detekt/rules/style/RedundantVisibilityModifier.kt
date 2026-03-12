@@ -4,6 +4,7 @@ import dev.detekt.api.Config
 import dev.detekt.api.DetektVisitor
 import dev.detekt.api.Entity
 import dev.detekt.api.Finding
+import dev.detekt.api.RequiresAnalysisApi
 import dev.detekt.api.Rule
 import dev.detekt.psi.isInternal
 import dev.detekt.psi.isOverride
@@ -11,10 +12,12 @@ import org.jetbrains.kotlin.config.AnalysisFlags
 import org.jetbrains.kotlin.config.ExplicitApiMode
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.KtClass
+import org.jetbrains.kotlin.psi.KtClassOrObject
 import org.jetbrains.kotlin.psi.KtDeclaration
 import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtModifierListOwner
 import org.jetbrains.kotlin.psi.KtNamedFunction
+import org.jetbrains.kotlin.psi.KtObjectDeclaration
 import org.jetbrains.kotlin.psi.KtProperty
 import org.jetbrains.kotlin.psi.psiUtil.containingClassOrObject
 import org.jetbrains.kotlin.psi.psiUtil.isPrivate
@@ -40,8 +43,11 @@ import org.jetbrains.kotlin.psi.psiUtil.isPrivate
  * }
  * </compliant>
  */
-class RedundantVisibilityModifier(config: Config) :
-    Rule(config, "Redundant visibility modifiers detected, which can be safely removed.") {
+class RedundantVisibilityModifier(config: Config) : Rule(
+    config = config,
+    description = "Redundant visibility modifiers detected, which can be safely removed.",
+), RequiresAnalysisApi {
+
     private val classVisitor = ClassVisitor()
     private val childrenVisitor = ChildrenVisitor()
 
@@ -65,7 +71,7 @@ class RedundantVisibilityModifier(config: Config) :
         if (!isExplicitApiModeActive()) {
             file.declarations.forEach {
                 it.accept(classVisitor)
-                it.acceptChildren(childrenVisitor)
+                it.accept(childrenVisitor)
             }
         }
     }
@@ -86,13 +92,13 @@ class RedundantVisibilityModifier(config: Config) :
     }
 
     private inner class ClassVisitor : DetektVisitor() {
-        override fun visitClass(klass: KtClass) {
-            super.visitClass(klass)
-            if (klass.isExplicitlyPublic()) {
+        override fun visitClassOrObject(classOrObject: KtClassOrObject) {
+            super.visitClassOrObject(classOrObject)
+            if (classOrObject.isExplicitlyPublic()) {
                 report(
                     Finding(
-                        Entity.atName(klass),
-                        message = "${klass.name} is explicitly marked as public. " +
+                        Entity.atName(classOrObject),
+                        message = "${classOrObject.name} is explicitly marked as public. " +
                             "Public is the default visibility for classes. The public modifier is redundant."
                     )
                 )
