@@ -2,6 +2,7 @@ package dev.detekt.gradle
 
 import dev.detekt.detekt_gradle_plugin.BuildConfig
 import dev.detekt.gradle.extensions.DetektReportType
+import dev.detekt.gradle.plugin.internal.GradleProperties
 import dev.detekt.gradle.extensions.DetektReports
 import dev.detekt.gradle.extensions.FailOnSeverity
 import dev.detekt.gradle.invoke.AllRulesArgument
@@ -155,7 +156,7 @@ abstract class Detekt @Inject constructor(
      */
     open val reports: DetektReports = objects.newInstance(DetektReports::class.java)
 
-    private val isDryRun = project.providers.gradleProperty(DRY_RUN_PROPERTY)
+    private val isDryRun = providers.gradleProperty(GradleProperties.DRY_RUN)
 
     @get:Input
     @get:Incubating
@@ -274,4 +275,3 @@ abstract class Detekt @Inject constructor(
         }
 }
 
-private const val DRY_RUN_PROPERTY = "detekt-dry-run"

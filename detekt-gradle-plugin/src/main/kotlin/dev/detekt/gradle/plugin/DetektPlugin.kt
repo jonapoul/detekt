@@ -11,6 +11,7 @@ import dev.detekt.gradle.plugin.DetektBasePlugin.Companion.CONFIG_FILE
 import dev.detekt.gradle.plugin.internal.DetektAndroidCompilations
 import dev.detekt.gradle.plugin.internal.DetektJvmCompilations
 import dev.detekt.gradle.plugin.internal.DetektKmpJvmCompilations
+import dev.detekt.gradle.plugin.internal.GradleProperties
 import dev.detekt.gradle.plugin.internal.conventionCompat
 import org.gradle.api.Incubating
 import org.gradle.api.Plugin
@@ -31,7 +32,7 @@ class DetektPlugin : Plugin<Project> {
         project.registerDetektJvmTasks(extension)
         val enableAndroidTasks =
             !project.providers
-                .gradleProperty(DETEKT_ANDROID_DISABLED_PROPERTY)
+                .gradleProperty(GradleProperties.ANDROID_DISABLED)
                 .getOrElse("false")
                 .toBoolean()
         if (enableAndroidTasks) {
@@ -39,7 +40,7 @@ class DetektPlugin : Plugin<Project> {
         }
         val enableMppTasks =
             !project.providers
-                .gradleProperty(DETEKT_MULTIPLATFORM_DISABLED_PROPERTY)
+                .gradleProperty(GradleProperties.MULTIPLATFORM_DISABLED)
                 .getOrElse("false")
                 .toBoolean()
         if (enableMppTasks) {
@@ -147,9 +148,6 @@ class DetektPlugin : Plugin<Project> {
         val defaultExcludes = listOf("build/")
         val defaultIncludes = listOf("**/*.kt", "**/*.kts")
 
-        internal const val DETEKT_ANDROID_DISABLED_PROPERTY = "detekt.android.disabled"
-        internal const val DETEKT_MULTIPLATFORM_DISABLED_PROPERTY = "detekt.multiplatform.disabled"
-
         internal const val DEFAULT_REPORT_ENABLED_VALUE = true
     }
 }
@@ -157,7 +155,7 @@ class DetektPlugin : Plugin<Project> {
 internal const val CONFIGURATION_DETEKT = "detekt"
 
 internal fun ProviderFactory.isWorkerApiEnabled(): Boolean =
-    gradleProperty("detekt.use.worker.api").getOrElse("false") == "true"
+    gradleProperty(GradleProperties.USE_WORKER_API).getOrElse("false") == "true"
 
 @Incubating
 fun getSupportedKotlinVersion(): String = BuildConfig.KOTLIN_IMPLEMENTATION_VERSION

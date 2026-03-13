@@ -9,11 +9,13 @@ import dev.detekt.gradle.internal.addVariantName
 import dev.detekt.gradle.internal.existingVariantOrBaseFile
 import dev.detekt.gradle.internal.setCreateBaselineTaskDefaults
 import dev.detekt.gradle.internal.setDetektTaskDefaults
+import dev.detekt.gradle.plugin.internal.GradleProperties
 import dev.detekt.gradle.plugin.internal.mapExplicitArgMode
 import dev.detekt.gradle.plugin.internal.rootProjectDirectoryCompat
 import org.gradle.api.Plugin
 import org.gradle.api.Project
 import org.gradle.api.plugins.ReportingBasePlugin
+import org.gradle.api.provider.Property
 import org.gradle.api.reporting.ReportingExtension
 import org.jetbrains.kotlin.gradle.plugin.KotlinBasePlugin
 import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSetContainer
@@ -26,10 +28,26 @@ class DetektBasePlugin : Plugin<Project> {
 
         val extension = project.extensions.create(DETEKT_EXTENSION, DetektExtension::class.java)
 
+        fun <T> Property<T>.convention(property: String, default: T, mapper: (String) -> T) = convention(
+            project.providers.gradleProperty(property)
+                .map(mapper)
+                .orElse(default)
+        )
+
+        fun Property<Boolean>.convention(property: String, default: Boolean) = convention(
+            property = property,
+            default = default,
+            mapper = { it.toBoolean() }
+        )
+
         with(extension) {
             toolVersion.convention(BuildConfig.DETEKT_VERSION)
-            ignoreFailures.convention(DEFAULT_IGNORE_FAILURES)
-            failOnSeverity.convention(DEFAULT_FAIL_ON_SEVERITY)
+            ignoreFailures.convention(GradleProperties.IGNORE_FAILURES, DEFAULT_IGNORE_FAILURES)
+            failOnSeverity.convention(
+                GradleProperties.FAIL_ON_SEVERITY,
+                DEFAULT_FAIL_ON_SEVERITY,
+                FailOnSeverity::valueOf
+            )
             source.setFrom(
                 DEFAULT_SRC_DIR_JAVA,
                 DEFAULT_TEST_SRC_DIR_JAVA,
@@ -37,13 +55,19 @@ class DetektBasePlugin : Plugin<Project> {
                 DEFAULT_TEST_SRC_DIR_KOTLIN,
             )
             baseline.convention(project.layout.projectDirectory.file("detekt-baseline.xml"))
-            enableCompilerPlugin.convention(DEFAULT_COMPILER_PLUGIN_ENABLED)
-            debug.convention(DEFAULT_DEBUG_VALUE)
-            parallel.convention(DEFAULT_PARALLEL_VALUE)
-            allRules.convention(DEFAULT_ALL_RULES_VALUE)
-            buildUponDefaultConfig.convention(DEFAULT_BUILD_UPON_DEFAULT_CONFIG_VALUE)
-            disableDefaultRuleSets.convention(DEFAULT_DISABLE_RULESETS_VALUE)
-            autoCorrect.convention(DEFAULT_AUTO_CORRECT_VALUE)
+            enableCompilerPlugin.convention(GradleProperties.ENABLE_COMPILER_PLUGIN, DEFAULT_COMPILER_PLUGIN_ENABLED)
+            debug.convention(GradleProperties.DEBUG, DEFAULT_DEBUG_VALUE)
+            parallel.convention(GradleProperties.PARALLEL, DEFAULT_PARALLEL_VALUE)
+            allRules.convention(GradleProperties.ALL_RULES, DEFAULT_ALL_RULES_VALUE)
+            buildUponDefaultConfig.convention(
+                GradleProperties.BUILD_UPON_DEFAULT_CONFIG,
+                DEFAULT_BUILD_UPON_DEFAULT_CONFIG_VALUE
+            )
+            disableDefaultRuleSets.convention(
+                GradleProperties.DISABLE_DEFAULT_RULE_SETS,
+                DEFAULT_DISABLE_RULESETS_VALUE
+            )
+            autoCorrect.convention(GradleProperties.AUTO_CORRECT, DEFAULT_AUTO_CORRECT_VALUE)
             reportsDir.convention(
                 project.extensions.getByType(ReportingExtension::class.java).baseDirectory.dir("detekt")
             )

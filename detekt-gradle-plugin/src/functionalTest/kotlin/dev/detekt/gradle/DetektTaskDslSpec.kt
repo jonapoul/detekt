@@ -452,6 +452,77 @@ class DetektTaskDslSpec {
     }
 
     @Nested
+    inner class `with flags via gradle properties` {
+        private val gradleRunner = kotlin().dryRun()
+            .withGradleProperties(
+                "detekt.debug" to "true",
+                "detekt.parallel" to "true",
+                "detekt.disableDefaultRuleSets" to "true",
+                "detekt.allRules" to "true",
+                "detekt.autoCorrect" to "true",
+                "detekt.buildUponDefaultConfig" to "true",
+                "detekt.ignoreFailures" to "true",
+            )
+            .build()
+        private val result = gradleRunner.runDetektTask()
+
+        @Test
+        fun `enables debug mode`() {
+            assertThat(result.output).contains("--debug")
+        }
+
+        @Test
+        fun `enables parallel processing`() {
+            assertThat(result.output).contains("--parallel")
+        }
+
+        @Test
+        fun `disables default ruleset`() {
+            assertThat(result.output).contains("--disable-default-rulesets")
+        }
+
+        @Test
+        fun `ignores failures`() {
+            assertThat(result.output).contains("Ignore failures: true")
+        }
+
+        @Test
+        fun `enables all rules`() {
+            assertThat(result.output).contains("--all-rules")
+        }
+
+        @Test
+        fun `enables using default config as baseline`() {
+            assertThat(result.output).contains("--build-upon-default-config")
+        }
+    }
+
+    @Nested
+    inner class `with failOnSeverity via gradle property` {
+        @Test
+        fun `with warning value`() {
+            val result = kotlin()
+                .dryRun()
+                .withGradleProperty(key = "detekt.failOnSeverity", value = "Warning")
+                .build()
+                .runDetektTask()
+
+            assertThat(result.output).contains("--fail-on-severity warning")
+        }
+
+        @Test
+        fun `with invalid value`() {
+            val result = kotlin()
+                .dryRun()
+                .withGradleProperty(key = "detekt.failOnSeverity", value = "SomethingElse")
+                .build()
+                .runDetektTask()
+
+            assertThat(result.output).contains("--fail-on-severity warning")
+        }
+    }
+
+    @Nested
     inner class `with cmdline args` {
         private val builder = kotlin().dryRun()
         private val gradleRunner = builder.build()
