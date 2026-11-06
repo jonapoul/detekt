@@ -3,17 +3,18 @@
 package dev.detekt.rules.style
 
 import com.intellij.psi.PsiElement
-import com.intellij.psi.util.PsiTreeUtil
 import dev.detekt.api.Config
 import dev.detekt.api.Entity
 import dev.detekt.api.Finding
 import dev.detekt.api.RequiresAnalysisApi
 import dev.detekt.api.Rule
-import dev.detekt.psi.isPartOf
 import org.jetbrains.kotlin.analysis.api.KaContextParameterApi
 import org.jetbrains.kotlin.analysis.api.KaExperimentalApi
+import org.jetbrains.kotlin.analysis.api.KaIdeApi
 import org.jetbrains.kotlin.analysis.api.KaSession
 import org.jetbrains.kotlin.analysis.api.analyze
+import org.jetbrains.kotlin.analysis.api.components.ShortenOptions
+import org.jetbrains.kotlin.analysis.api.components.ShortenStrategy
 import org.jetbrains.kotlin.analysis.api.components.containingDeclaration
 import org.jetbrains.kotlin.analysis.api.components.expectedType
 import org.jetbrains.kotlin.analysis.api.components.expressionType
@@ -21,14 +22,10 @@ import org.jetbrains.kotlin.analysis.api.components.isSubClassOf
 import org.jetbrains.kotlin.analysis.api.components.isSubtypeOf
 import org.jetbrains.kotlin.analysis.api.components.resolveSymbol
 import org.jetbrains.kotlin.analysis.api.components.resolveToCall
-import org.jetbrains.kotlin.analysis.api.components.resolveToCallCandidates
 import org.jetbrains.kotlin.analysis.api.components.returnType
 import org.jetbrains.kotlin.analysis.api.components.scopeContext
 import org.jetbrains.kotlin.analysis.api.components.semanticallyEquals
-import org.jetbrains.kotlin.analysis.api.diagnostics.KaDiagnosticWithPsi
-import org.jetbrains.kotlin.analysis.api.resolution.KaCallCandidateInfo
 import org.jetbrains.kotlin.analysis.api.resolution.KaFunctionCall
-import org.jetbrains.kotlin.analysis.api.resolution.KaInapplicableCallCandidateInfo
 import org.jetbrains.kotlin.analysis.api.resolution.successfulFunctionCallOrNull
 import org.jetbrains.kotlin.analysis.api.resolution.symbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaCallableSymbol
@@ -43,9 +40,9 @@ import org.jetbrains.kotlin.analysis.api.symbols.KaSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.KaSymbolModality
 import org.jetbrains.kotlin.analysis.api.symbols.KaTypeParameterSymbol
 import org.jetbrains.kotlin.analysis.api.symbols.markers.KaNamedSymbol
+import org.jetbrains.kotlin.analysis.api.symbols.typeParameters
 import org.jetbrains.kotlin.analysis.api.types.KaClassType
 import org.jetbrains.kotlin.analysis.api.types.KaFlexibleType
-import org.jetbrains.kotlin.analysis.api.types.KaFunctionType
 import org.jetbrains.kotlin.analysis.api.types.KaType
 import org.jetbrains.kotlin.analysis.api.types.KaTypeParameterType
 import org.jetbrains.kotlin.config.LanguageFeature
@@ -53,38 +50,31 @@ import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.KtBinaryExpression
 import org.jetbrains.kotlin.psi.KtBinaryExpressionWithTypeRHS
 import org.jetbrains.kotlin.psi.KtBlockExpression
+import org.jetbrains.kotlin.psi.KtCallElement
 import org.jetbrains.kotlin.psi.KtCallExpression
 import org.jetbrains.kotlin.psi.KtCallableDeclaration
 import org.jetbrains.kotlin.psi.KtCatchClause
 import org.jetbrains.kotlin.psi.KtContainerNodeForControlStructureBody
 import org.jetbrains.kotlin.psi.KtDotQualifiedExpression
 import org.jetbrains.kotlin.psi.KtElement
-import org.jetbrains.kotlin.psi.KtExperimentalApi
 import org.jetbrains.kotlin.psi.KtExpression
 import org.jetbrains.kotlin.psi.KtFile
 import org.jetbrains.kotlin.psi.KtFunctionLiteral
 import org.jetbrains.kotlin.psi.KtIfExpression
-import org.jetbrains.kotlin.psi.KtImportDirective
 import org.jetbrains.kotlin.psi.KtIsExpression
-import org.jetbrains.kotlin.psi.KtLambdaExpression
 import org.jetbrains.kotlin.psi.KtNameReferenceExpression
+import org.jetbrains.kotlin.psi.KtNamedFunction
 import org.jetbrains.kotlin.psi.KtNullableType
-import org.jetbrains.kotlin.psi.KtPackageDirective
 import org.jetbrains.kotlin.psi.KtParenthesizedExpression
-import org.jetbrains.kotlin.psi.KtPropertyAccessor
-import org.jetbrains.kotlin.psi.KtPsiUtil
 import org.jetbrains.kotlin.psi.KtReturnExpression
 import org.jetbrains.kotlin.psi.KtTryExpression
 import org.jetbrains.kotlin.psi.KtTypeReference
 import org.jetbrains.kotlin.psi.KtUserType
 import org.jetbrains.kotlin.psi.KtValueArgument
-import org.jetbrains.kotlin.psi.KtValueArgumentList
 import org.jetbrains.kotlin.psi.KtWhenConditionIsPattern
-import org.jetbrains.kotlin.psi.KtWhenConditionWithExpression
 import org.jetbrains.kotlin.psi.KtWhenEntry
 import org.jetbrains.kotlin.psi.KtWhenExpression
 import org.jetbrains.kotlin.psi.psiUtil.getStrictParentOfType
-import org.jetbrains.kotlin.psi.psiUtil.parents
 
 /**
  * Reports qualified enum entries, sealed subtypes and companion object properties that can be written without their
@@ -200,21 +190,25 @@ class UseContextSensitiveResolution(config: Config) :
         if (parent is KtDotQualifiedExpression && parent.receiverExpression == expression) return
         // Receivers like makeUser() or this can't name a class, so there is no need to analyze them
         if (!expression.receiverExpression.isNameChain()) return
-        if (hasNoExpectedType(expression)) return
 
         analyze(expression) {
             @OptIn(KaExperimentalApi::class)
             val symbol = selector.resolveSymbol() ?: return
-            val owner = owner(symbol) ?: return
-            val expected = expectedType(expression) ?: return
-            if (!expected.isSearchedIn(owner)) return
-            // In `failure ?: State.Loading` the left side's type State.Failure is expected, and Loading isn't one
-            if (expression.expressionType?.isSubtypeOf(expected) != true) return
-            // A branch of an if or when passed as an argument can get its expected type from the other branches.
-            // In `takesResponse(if (x) Response.Success(1) else Empty)` that is Response.Success<Int>, so Empty
-            // isn't found. Every enum entry has the enum's type, so enum entries are safe
-            if (symbol !is KaEnumEntrySymbol && argumentBranchRoot(expression) != null) return
-            if (!isInScope(expression, symbol)) {
+            if (isInScope(expression, symbol)) return
+
+            @OptIn(KaIdeApi::class)
+            val command = collectPossibleReferenceShorteningsInElement(
+                element = expression,
+                shortenOptions = ShortenOptions(removeContextSensitiveResolutionQualifiers = true),
+                classShortenStrategy = { ShortenStrategy.SHORTEN_IF_ALREADY_IMPORTED },
+                callableShortenStrategy = { ShortenStrategy.SHORTEN_IF_ALREADY_IMPORTED },
+            )
+
+            @OptIn(KaIdeApi::class)
+            val shortened = command.listOfQualifierToShortenInfo.any {
+                it.qualifierToShorten.element == expression && it.shortenedReference == null
+            }
+            if (shortened) {
                 report(expression, selector.getReferencedName(), "the expected type is known")
             }
         }
@@ -240,8 +234,7 @@ class UseContextSensitiveResolution(config: Config) :
             val arguments = names.joinToString { it.getReferencedName() }
             val original = "${callee.text}(${qualified.joinToString { it.text }})"
             // val roles: List<Role> = listOf(Role.Admin) already gives listOf its type argument
-            val typed = expression.expressionType?.let { expectedType(expression)?.semanticallyEquals(it) } == true
-            if (typed) {
+            if (hasDeclaredType(expression)) {
                 report(expression, "${callee.text}($arguments)", "the expected type is known", original)
             } else {
                 // listOf<Response>(...) would be missing Response's own type arguments
@@ -276,6 +269,67 @@ class UseContextSensitiveResolution(config: Config) :
         }
     }
 
+    // Whether the expected type is written in the code and matches, as in val roles: List<Role> = listOf(Role.Admin).
+    // override val roles = listOf(Role.Admin) and lambda results like lazy { listOf(Role.Admin) } take their type
+    // from the call instead
+    @OptIn(KaContextParameterApi::class)
+    context(_: KaSession)
+    private fun hasDeclaredType(expression: KtExpression): Boolean {
+        var child: PsiElement = expression
+        var parent = child.parent
+        while (parent.passesResultUp(child)) {
+            child = parent
+            parent = parent.parent
+        }
+        val declared = when (parent) {
+            is KtCallableDeclaration -> parent !is KtFunctionLiteral && parent.typeReference != null
+
+            is KtReturnExpression ->
+                parent.getTargetLabel() == null &&
+                    parent.getStrictParentOfType<KtNamedFunction>()?.typeReference != null
+
+            is KtBinaryExpression -> parent.operationToken == KtTokens.EQ
+
+            is KtValueArgument -> hasDeclaredParameterType(parent, child as KtExpression)
+
+            else -> false
+        }
+        return declared && expression.expressionType?.let { expression.expectedType?.semanticallyEquals(it) } == true
+    }
+
+    // Whether the parameter's type doesn't depend on the function's type parameters, like roles: List<Role>
+    @OptIn(KaContextParameterApi::class)
+    context(_: KaSession)
+    private fun hasDeclaredParameterType(argument: KtValueArgument, expression: KtExpression): Boolean {
+        val call = argument.getStrictParentOfType<KtCallElement>()?.resolveToCall()?.successfulFunctionCallOrNull()
+        val declared = call?.valueArgumentMapping?.get(expression)?.symbol?.returnType ?: return false
+
+        @OptIn(KaExperimentalApi::class)
+        return call.symbol.typeParameters.none { declared.mentions(it) }
+    }
+
+    // Parentheses and if, when and try branches pass their result to their parent
+    private fun PsiElement.passesResultUp(child: PsiElement): Boolean =
+        when (this) {
+            is KtParenthesizedExpression,
+            is KtContainerNodeForControlStructureBody,
+            is KtIfExpression,
+            is KtTryExpression,
+            is KtCatchClause,
+                -> true
+
+            is KtWhenEntry -> expression == child
+
+            is KtWhenExpression -> child is KtWhenEntry
+
+            is KtBlockExpression -> statements.lastOrNull() == child && parent.let {
+                it is KtContainerNodeForControlStructureBody || it is KtWhenEntry || it is KtTryExpression ||
+                    it is KtCatchClause
+            }
+
+            else -> false
+        }
+
     // The value being checked or cast, or the `when` whose subject is
     private fun checkedValue(typeReference: KtTypeReference): KtExpression? =
         when (val parent = typeReference.parent) {
@@ -284,12 +338,6 @@ class UseContextSensitiveResolution(config: Config) :
             is KtWhenConditionIsPattern -> parent.getStrictParentOfType<KtWhenExpression>()
             else -> null
         }
-
-    // Imports, package directives and untyped declarations like val role = Role.Admin
-    private fun hasNoExpectedType(expression: KtExpression): Boolean =
-        expression.isPartOf<KtImportDirective>() ||
-            expression.isPartOf<KtPackageDirective>() ||
-            isUntypedDeclaration(expression)
 
     private fun KtExpression.isNameChain(): Boolean =
         when (this) {
@@ -394,223 +442,10 @@ class UseContextSensitiveResolution(config: Config) :
         }
     }
 
-    // The expected type context-sensitive resolution would use, or null. The Analysis API's expectedType is
-    // too generous for some positions, so those are worked out by hand
-    @OptIn(KaContextParameterApi::class)
-    context(_: KaSession)
-    private fun expectedType(expression: KtExpression): KaType? =
-        when (val parent = expression.parent) {
-            is KtBinaryExpression -> operandType(parent, expression)
-
-            is KtWhenConditionWithExpression ->
-                parent.getStrictParentOfType<KtWhenExpression>()?.let { subjectType(it) }
-
-            is KtValueArgument -> argumentType(parent, expression)
-
-            is KtParenthesizedExpression -> expectedType(parent)
-
-            else -> {
-                val branchRoot = argumentBranchRoot(expression)
-                if (branchRoot != null) {
-                    argumentType(branchRoot.parent as KtValueArgument, branchRoot)
-                } else {
-                    tryResultType(expression)
-                        ?: expression.expectedType?.takeUnless {
-                            isUntypedDeclaration(expression) || isInferredLambdaResult(expression)
-                        }
-                }
-            }
-        }
-
-    // "override val role = Role.Admin" and "val role = if (x) Role.Admin else Role.Basic" take their
-    // type from the initializer, so there is no expected type to use
-    private fun isUntypedDeclaration(expression: KtExpression): Boolean {
-        val parent = expression.parents.firstOrNull { element ->
-            !element.isBranchBody() && element !is KtBlockExpression && element !is KtParenthesizedExpression
-        }
-        val declaration = (parent as? KtPropertyAccessor)?.property ?: parent
-        return declaration is KtCallableDeclaration &&
-            declaration !is KtFunctionLiteral &&
-            declaration.typeReference == null
-    }
-
-    @OptIn(KaContextParameterApi::class)
-    context(_: KaSession)
-    private fun argumentType(argument: KtValueArgument, expression: KtExpression): KaType? {
-        val call = callOf(argument)
-        val inferred = call != null && isInferred(call, expression) { type -> type }
-        return if (inferred) null else expression.expectedType
-    }
-
-    @OptIn(KaContextParameterApi::class)
-    context(_: KaSession)
-    private fun operandType(binary: KtBinaryExpression, operand: KtExpression): KaType? =
-        when (binary.operationToken) {
-            // The right side of role == Role.Admin takes the type of the left. The left side gets nothing
-            in EQUALITY -> if (binary.right == operand) binary.left?.expressionType else null
-
-            KtTokens.EQ -> operand.expectedType
-
-            KtTokens.ELVIS -> if (binary.right == operand) binary.left?.expressionType else null
-
-            // roles += Role.Admin doesn't pass an expected type down
-            in KtTokens.AUGMENTED_ASSIGNMENTS -> null
-
-            else -> {
-                val resolved = binary.resolveToCall()?.successfulFunctionCallOrNull()
-                val signature = resolved?.valueArgumentMapping?.get(operand)
-                signature?.returnType?.takeUnless { isInferred(binary, operand) { type -> type } }
-            }
-        }
-
-    context(_: KaSession)
-    private fun tryResultType(expression: KtExpression): KaType? {
-        val block = expression.parent as? KtBlockExpression ?: return null
-        if (block.statements.lastOrNull() != expression) return null
-        val tryExpression = when (val parent = block.parent) {
-            is KtTryExpression -> parent.takeIf { it.tryBlock == block }
-            is KtCatchClause -> parent.parent as? KtTryExpression
-            else -> null
-        }
-        return tryExpression?.let { expectedType(it) }
-    }
-
-    // The `if`, `when` or `try` that the expression is a branch result of, when that sits directly in an argument
-    private fun argumentBranchRoot(expression: KtExpression): KtExpression? {
-        val path = expression.parents
-            .takeWhile { it.isBranchBody() || it is KtBlockExpression || it is KtParenthesizedExpression }
-            .toList()
-        if (path.none { it.isBranchBody() }) return null
-        return (path.last() as? KtExpression)?.takeIf { it.parent is KtValueArgument }
-    }
-
-    private fun PsiElement.isBranchBody(): Boolean =
-        this is KtContainerNodeForControlStructureBody ||
-            this is KtWhenEntry ||
-            this is KtIfExpression ||
-            this is KtWhenExpression ||
-            this is KtTryExpression ||
-            this is KtCatchClause
-
     @OptIn(KaContextParameterApi::class)
     context(_: KaSession)
     private fun subjectType(whenExpression: KtWhenExpression): KaType? =
         whenExpression.subjectVariable?.returnType ?: whenExpression.subjectExpression?.expressionType
-
-    // A trailing lambda's parent is the call itself, other arguments sit inside a KtValueArgumentList
-    private fun callOf(argument: KtValueArgument): KtCallExpression? =
-        when (val parent = argument.parent) {
-            is KtValueArgumentList -> parent.parent as? KtCallExpression
-            else -> parent as? KtCallExpression
-        }
-
-    // Whether the expression is a lambda's result and the lambda's return type is inferred from it, as in
-    // associateWith { Role.Admin }. flow.update { State.Loading } is fine, since update fixes the type
-    context(_: KaSession)
-    private fun isInferredLambdaResult(expression: KtExpression): Boolean {
-        val lambda = lambdaReturning(expression) ?: return false
-        val argument = lambda.parent as? KtValueArgument ?: return isUntypedDeclaration(lambda)
-        val call = callOf(argument) ?: return true
-        return isInferred(call, lambda) { type -> (type as? KaFunctionType)?.returnType }
-    }
-
-    @OptIn(KaContextParameterApi::class)
-    context(_: KaSession)
-    private fun lambdaReturning(element: PsiElement): KtLambdaExpression? {
-        val parent = element.parent
-        val passesResultUp = when (parent) {
-            is KtFunctionLiteral -> return parent.parent as? KtLambdaExpression
-
-            is KtBlockExpression -> parent.statements.lastOrNull() == element
-
-            is KtIfExpression -> parent.condition != element
-
-            // return@label leaves the lambda it names from anywhere in its body. A plain return leaves the
-            // enclosing function instead
-            is KtReturnExpression -> {
-                val label = parent.getTargetLabel() ?: return null
-
-                @OptIn(KaExperimentalApi::class, KtExperimentalApi::class)
-                val target = label.resolveSymbol()?.psi as? KtFunctionLiteral
-                return target?.parent as? KtLambdaExpression
-            }
-
-            is KtWhenEntry,
-            is KtWhenExpression,
-            is KtContainerNodeForControlStructureBody,
-            is KtParenthesizedExpression,
-            -> true
-
-            else -> false
-        }
-        return if (passesResultUp) lambdaReturning(parent) else null
-    }
-
-    // Whether the type comes from the argument itself, as it does for T in listOf(Role.Admin), or
-    // can't be pinned down because overloads disagree about it. There is no expected type in both
-    @OptIn(KaContextParameterApi::class)
-    context(_: KaSession)
-    private fun isInferred(call: KtElement, argument: KtExpression, select: (KaType) -> KaType?): Boolean {
-        val resolved = call.resolveToCall()?.successfulFunctionCallOrNull()
-        val signature = resolved?.valueArgumentMapping?.get(argument)
-        val declared = signature?.let { select(it.symbol.returnType) }
-        val substituted = signature?.let { select(it.returnType) }
-        if (resolved == null || declared == null || substituted == null) return true
-
-        // overloaded(Role.Admin) with overloaded(Role) and overloaded(Int) has no single expected type
-        val overloadsDisagree = call.resolveToCallCandidates().any { info ->
-            val candidate = info.candidate as? KaFunctionCall<*>
-            val other = candidate?.valueArgumentMapping?.get(argument)?.returnType
-            other != null &&
-                !failsElsewhere(info, argument) &&
-                select(other)?.semanticallyEquals(substituted) != true
-        }
-
-        val decidedByArgument = (call as? KtCallExpression)?.typeArgumentList == null &&
-            declared is KaTypeParameterType &&
-            isDecidedByArgument(declared.symbol, resolved.symbol) &&
-            !isFixedByOtherArgument(resolved, argument, declared.symbol, substituted)
-        return overloadsDisagree || decidedByArgument
-    }
-
-    // Whether another argument already gives the type parameter its type, as makeRole() does in
-    // listOf(Role.Admin, makeRole())
-    @OptIn(KaContextParameterApi::class)
-    context(_: KaSession)
-    private fun isFixedByOtherArgument(
-        call: KaFunctionCall<*>,
-        argument: KtExpression,
-        parameter: KaTypeParameterSymbol,
-        type: KaType,
-    ): Boolean =
-        call.valueArgumentMapping.any { (other, signature) ->
-            other != argument &&
-                (signature.symbol.returnType as? KaTypeParameterType)?.symbol == parameter &&
-                !mayLoseQualifier(other) &&
-                other.expressionType?.semanticallyEquals(type) == true
-        }
-
-    // Names the rule could report, and branches that could hold them, may not keep their type once fixed
-    @OptIn(KaContextParameterApi::class)
-    context(_: KaSession)
-    private fun mayLoseQualifier(expression: KtExpression): Boolean {
-        val unwrapped = KtPsiUtil.safeDeparenthesize(expression)
-        if (unwrapped.isBranchBody()) return true
-        val selector = (unwrapped as? KtDotQualifiedExpression)?.selectorExpression as? KtNameReferenceExpression
-            ?: return false
-
-        @OptIn(KaExperimentalApi::class)
-        val symbol = selector.resolveSymbol() ?: return true
-        return owner(symbol) != null
-    }
-
-    // A candidate that fails on something other than this argument, like Assert<String?>.isEqualTo
-    // called on an Assert<Role>, is dropped before the argument is looked at
-    private fun failsElsewhere(info: KaCallCandidateInfo, argument: KtExpression): Boolean {
-        val diagnostic = (info as? KaInapplicableCallCandidateInfo)?.diagnostic
-        val psi = (diagnostic as? KaDiagnosticWithPsi<*>)?.psi ?: return false
-        return !PsiTreeUtil.isAncestor(argument.parent as? KtValueArgument ?: argument, psi, false)
-    }
 
     // Whether the arguments decide the type parameter, as they do for listOf and constructors.
     // Assert<T>.isEqualTo(expected: T) gets T from its receiver, not the argument
@@ -673,9 +508,5 @@ class UseContextSensitiveResolution(config: Config) :
     private fun KaCallableSymbol.isReachableWith(receivers: List<KaType>): Boolean {
         val receiver = receiverParameter?.returnType ?: return true
         return receiver is KaTypeParameterType || receivers.any { it.isSubtypeOf(receiver) }
-    }
-
-    private companion object {
-        val EQUALITY = setOf(KtTokens.EQEQ, KtTokens.EXCLEQ, KtTokens.EQEQEQ, KtTokens.EXCLEQEQEQ)
     }
 }

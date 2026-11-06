@@ -1,21 +1,25 @@
 package dev.detekt.core.parser
 
+import org.jetbrains.kotlin.cli.common.arguments.CommonCompilerArgumentsConfigurator
 import org.jetbrains.kotlin.cli.common.arguments.K2JVMCompilerArguments
 import org.jetbrains.kotlin.cli.common.arguments.parseCommandLineArguments
+import org.jetbrains.kotlin.cli.common.arguments.toLanguageVersionSettings
 import org.jetbrains.kotlin.cli.common.arguments.validateArguments
 import org.jetbrains.kotlin.cli.common.config.addKotlinSourceRoots
+import org.jetbrains.kotlin.cli.common.fromConfiguration
 import org.jetbrains.kotlin.cli.common.messages.MessageRenderer
 import org.jetbrains.kotlin.cli.common.messages.PrintingMessageCollector
-import org.jetbrains.kotlin.cli.common.setupLanguageVersionSettings
 import org.jetbrains.kotlin.cli.create
 import org.jetbrains.kotlin.cli.jvm.config.addJavaSourceRoots
 import org.jetbrains.kotlin.cli.jvm.config.addJvmClasspathRoots
 import org.jetbrains.kotlin.cli.jvm.config.configureJdkClasspathRoots
 import org.jetbrains.kotlin.cli.jvm.configureAdvancedJvmOptions
 import org.jetbrains.kotlin.cli.jvm.setupJvmSpecificArguments
+import org.jetbrains.kotlin.config.AnalysisFlags
 import org.jetbrains.kotlin.config.CommonConfigurationKeys
 import org.jetbrains.kotlin.config.CompilerConfiguration
 import org.jetbrains.kotlin.config.JVMConfigurationKeys
+import org.jetbrains.kotlin.config.languageVersionSettings
 import java.io.File
 import java.io.PrintStream
 import java.nio.file.Path
@@ -78,7 +82,11 @@ fun createCompilerConfiguration(
             CommonConfigurationKeys.MESSAGE_COLLECTOR_KEY,
             PrintingMessageCollector(printStream, MessageRenderer.PLAIN_FULL_PATHS, false)
         )
-        setupLanguageVersionSettings(jvmCompilerArguments)
+        languageVersionSettings = jvmCompilerArguments.toLanguageVersionSettings(
+            CommonCompilerArgumentsConfigurator.Reporter.fromConfiguration(this),
+            mapOf(AnalysisFlags.ideMode to true),
+        )
+
         setupJvmSpecificArguments(jvmCompilerArguments)
         configureAdvancedJvmOptions(jvmCompilerArguments)
 

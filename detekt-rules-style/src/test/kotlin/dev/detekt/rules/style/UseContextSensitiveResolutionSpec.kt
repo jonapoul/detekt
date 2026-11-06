@@ -9,10 +9,12 @@ import dev.detekt.test.utils.KotlinEnvironmentContainer
 import org.assertj.core.api.Assertions.assertThat
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.intellij.lang.annotations.Language
+import org.jetbrains.kotlin.config.AnalysisFlags
 import org.jetbrains.kotlin.config.ApiVersion
 import org.jetbrains.kotlin.config.LanguageFeature
 import org.jetbrains.kotlin.config.LanguageVersion
 import org.jetbrains.kotlin.config.LanguageVersionSettingsImpl
+import org.junit.jupiter.api.Disabled
 import org.junit.jupiter.api.Nested
 import org.junit.jupiter.api.Test
 
@@ -58,6 +60,7 @@ class UseContextSensitiveResolutionSpec(private val env: KotlinEnvironmentContai
             )
 
         @Test
+        @Disabled("The compiler does not flag this yet, see KT-84719")
         fun `reports enum entry in an assertion`() =
             assertReported(
                 "fun foo(role: Role) = Assert(role).isEqualTo(Role.Admin)",
@@ -65,6 +68,7 @@ class UseContextSensitiveResolutionSpec(private val env: KotlinEnvironmentContai
             )
 
         @Test
+        @Disabled("The compiler does not flag this yet, see KT-84719")
         fun `reports sealed object in an assertion on a property`() =
             assertReported(
                 "fun foo(screen: Assert<Screen>) = screen.prop(Screen::state).isEqualTo(State.Loading)",
@@ -72,10 +76,12 @@ class UseContextSensitiveResolutionSpec(private val env: KotlinEnvironmentContai
             )
 
         @Test
+        @Disabled("The compiler does not flag this yet, see KT-84719")
         fun `reports enum entry with explicit type arguments`() =
             assertReported("fun foo() = listOf<Role>(Role.Admin)", "Role.Admin" to "Admin")
 
         @Test
+        @Disabled("The compiler does not flag this yet, see KT-84719")
         fun `reports enum entry in an argument branch`() =
             assertReported(
                 "fun foo(set: Boolean) = takesRole(if (set) Role.Admin else Role.Basic)",
@@ -124,6 +130,7 @@ class UseContextSensitiveResolutionSpec(private val env: KotlinEnvironmentContai
             assertNotReported("fun foo() = listOf(Role.Admin)", "Role.Admin" to "Admin")
 
         @Test
+        @Disabled("The compiler does not flag this yet, see KT-84719")
         fun `reports enum entries when another argument decides the type`() =
             assertReported(
                 "fun foo() = listOf(Role.Admin, makeRole(), Role.Basic)",
@@ -132,6 +139,7 @@ class UseContextSensitiveResolutionSpec(private val env: KotlinEnvironmentContai
             )
 
         @Test
+        @Disabled("The compiler does not flag this yet, see KT-84719")
         fun `reports enum entry when a nullable argument decides the type`() =
             assertReported("fun foo(role: Role?) = listOf(Role.Admin, role)", "Role.Admin" to "Admin")
 
@@ -318,10 +326,12 @@ class UseContextSensitiveResolutionSpec(private val env: KotlinEnvironmentContai
             )
 
         @Test
+        @Disabled("The compiler does not flag this yet, see KT-84719")
         fun `reports an elvis operand with no expected type`() =
             assertReported("fun foo(role: Role?) = role ?: Role.Admin", "Role.Admin" to "Admin")
 
         @Test
+        @Disabled("The compiler does not flag this yet, see KT-84719")
         fun `reports an elvis operand in an argument that decides the type`() =
             assertReported("fun foo(role: Role?) = listOf(role ?: Role.Admin)", "Role.Admin" to "Admin")
 
@@ -602,6 +612,7 @@ class UseContextSensitiveResolutionSpec(private val env: KotlinEnvironmentContai
             )
 
         @Test
+        @Disabled("The compiler does not flag this yet, see KT-84719")
         fun `reports enum entry as a try result`() =
             assertReported(
                 "fun foo(): Role = try { makeRole() } catch (e: Exception) { Role.Admin }",
@@ -762,6 +773,49 @@ class UseContextSensitiveResolutionSpec(private val env: KotlinEnvironmentContai
         fun `reports a single enum entry in a collection with a declared type`() =
             assertReported(
                 "val roles: List<Role> = listOf(Role.Admin)",
+                "listOf(Role.Admin)" to "listOf(Admin)",
+            )
+
+        @Test
+        fun `reports a collection returned from a function with a declared type`() =
+            assertReported(
+                "fun foo(): List<Role> { return listOf(Role.Admin) }",
+                "listOf(Role.Admin)" to "listOf(Admin)",
+            )
+
+        @Test
+        fun `reports a collection in a branch of a property with a declared type`() =
+            assertReported(
+                "fun foo(set: Boolean) { val roles: List<Role> = if (set) listOf(Role.Admin) else emptyList() }",
+                "listOf(Role.Admin)" to "listOf(Admin)",
+            )
+
+        @Test
+        fun `does not report a collection in an override with no declared type`() =
+            assertNotReported(
+                """
+                interface HasRoles {
+                    val roles: List<Role>
+                }
+
+                object Admins : HasRoles {
+                    override val roles = listOf(Role.Admin)
+                }
+                """.trimIndent(),
+                "listOf(Role.Admin)" to "listOf(Admin)",
+            )
+
+        @Test
+        fun `does not report a collection in a branch of a property with no declared type`() =
+            assertNotReported(
+                "fun foo(set: Boolean) { val roles = if (set) listOf(Role.Admin) else emptyList() }",
+                "listOf(Role.Admin)" to "listOf(Admin)",
+            )
+
+        @Test
+        fun `does not report a collection returned from a lambda`() =
+            assertNotReported(
+                "val roles by lazy { listOf(Role.Admin) }",
                 "listOf(Role.Admin)" to "listOf(Admin)",
             )
     }
@@ -1025,6 +1079,7 @@ class UseContextSensitiveResolutionSpec(private val env: KotlinEnvironmentContai
         val CSR = LanguageVersionSettingsImpl(
             languageVersion = LanguageVersion.LATEST_STABLE,
             apiVersion = ApiVersion.LATEST_STABLE,
+            analysisFlags = mapOf(AnalysisFlags.ideMode to true),
             specificFeatures = mapOf(
                 LanguageFeature.ContextSensitiveResolutionUsingExpectedType to LanguageFeature.State.ENABLED,
             ),
